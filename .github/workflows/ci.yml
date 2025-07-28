@@ -19,4 +19,4 @@ jobs:
           go-version: "1.23.0"
 
       - name: Find go-version
-        run: go-version && (exit 0)
+        run: go version && (exit 0)
