@@ -10,37 +10,60 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout source
       - name: Check out code
         uses: actions/checkout@v4
 
+      # 2. Optional: Check last commit for secrets
+      - name: Check for accidental secrets in git diff
+        run: |
+          echo "Checking for secrets in last commit..."
+          git diff HEAD~1 HEAD | grep -E "DATABASE_URL|authToken" && exit 1 || echo "No secrets found."
+
+      # 3. Set up Go for Goose & your build
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.23.0"
 
+      # 4. Install Goose for DB migrations
+      - name: Install Goose
+        run: go install github.com/pressly/goose/v3/cmd/goose@latest
+
+      # 5. Build app
       - name: Build app
         run: scripts/buildprod.sh
 
+      # 6. Authenticate to Google Cloud
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_CREDENTIALS }}
 
+      # 7. Set up gcloud CLI
       - name: Set up gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: notely-467511
           export_default_credentials: true
 
+      # 8. Configure Docker for Artifact Registry
       - name: Configure Docker
-        run: |
-          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
-      - name: Build & Push using Cloud Build
+      # 9. Build & Push Docker image using Cloud Build
+      - name: Build & Push Docker Image
         run: |
           IMAGE="us-central1-docker.pkg.dev/notely-467511/notely-ar-repo/notely-app:latest"
           gcloud builds submit --tag $IMAGE
 
+      # 10. Run DB migrations AFTER image build but BEFORE deploy
+      - name: Run DB Migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: ./scripts/migrateup.sh
+
+      # 11. Deploy to Cloud Run
       - name: Deploy to Cloud Run
         run: |
           IMAGE="us-central1-docker.pkg.dev/notely-467511/notely-ar-repo/notely-app:latest"
@@ -50,5 +73,3 @@ jobs:
             --allow-unauthenticated \
             --project notely-467511 \
             --max-instances=4
-
-
